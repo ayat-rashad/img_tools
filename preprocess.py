@@ -1,7 +1,12 @@
 import cv2 
 import numpy as np
 import scipy as sc
-from PIL import ImageOps, Image
+from PIL import ImageOps, Image, ImageDraw
+
+from skimage import segmentation
+from skimage.draw import polygon2mask
+from skimage.measure import find_contours
+
 from matplotlib.pyplot import imshow
 from pylab import *
 
@@ -70,14 +75,50 @@ def contrast(im, cutoff=0, ignore=None):
     return im
 
 
-def denoise(im,h=3,tw=7,sw=21):
+def denoise(im,h=10,tw=7,sw=21):
     if type(im) is not np.ndarray:
         im = np.array(im)
         
     #im = cv2.GaussianBlur(im,(5,5),0)
-    im = cv2.fastNlMeansDenoising(im,None,h,tw,sw)
+    if is_colored(im):
+        im = cv2.fastNlMeansDenoisingColored(im,None,h=h, hColor=h, templateWindowSize=tw, searchWindowSize=sw)
+    else:
+        im = cv2.fastNlMeansDenoising(im,None,h=h, templateWindowSize=tw, searchWindowSize=sw)
     
     return im
+
+
+def get_foreground(im):
+    im_processed = cv2.Laplacian(im,cv2.CV_8UC1)
+    im2_processed = preprocess.denoise(im2_processed, h=3)
+    #im_processed = cv2.dilate(im_processed,ones((3,3)),iterations=1)
+    im_processed = threshold(im_processed, binary=False)
+    
+    h, w = im.shape[:2]
+    seed = (int(h/2),int(w/2))
+    #ImageDraw.floodfill(foreground, (h/2-2,w/2-8), 255, border=None, thresh=255)
+    foreground = segmentation.flood_fill(im_processed, seed, 255, connectivity=0, tolerance=0, in_place=False)
+    
+    return foreground
+
+
+def get_foreground2(im):
+    im_thresh = threshold(im)
+    contours = find_contours(im_thresh,.9,fully_connected='high', positive_orientation='low')
+    msk = polygon2mask(im.shape[:2],contours[0]).astype('uint8')
+    
+    return msk
+
+
+def get_rand_points(msk,size=5):
+    non_black = np.argwhere(msk > 0)
+    rand_points = np.random.randint(0, non_black.shape[0], size=size)
+    
+    return non_black[rand_points]
+
+
+def is_colored(im):
+    return len(im.shape) > 2
 
 
 def recolor_bw(im, new_color):
