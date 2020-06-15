@@ -6,6 +6,7 @@ from PIL import ImageOps, Image, ImageDraw
 from skimage import segmentation
 from skimage.draw import polygon2mask
 from skimage.measure import find_contours
+from skimage.filters import difference_of_gaussians
 
 from matplotlib.pyplot import imshow
 from pylab import *
@@ -128,6 +129,27 @@ def recolor_bw(im, new_color):
     im[msk] = new_color
     
     return im
+
+
+def enhance_edges(im):
+    im_edge_enh = difference_of_gaussians(im, 1.5, multichannel=False)#, mode='constant', cval=1)
+    im_edge_enh = cv2.normalize(im_edge_enh,None,alpha=0,beta=255, norm_type=cv2.NORM_MINMAX).astype('uint8')
+    
+    return im_edge_enh
+
+
+def detect_edges(im, enhance=True):
+    im_processed = im.copy()
+    
+    if enhance:
+        im_processed = enhance_edges(im_processed)
+        
+    im_processed = cv2.Laplacian(im_processed,cv2.CV_8UC1)
+    im_processed = cv2.dilate(im_processed,ones((5,5)),3)
+    im_processed = threshold(im_processed, binary=False)
+    
+    return im_processed
+
 
 
 def not_white(im):
