@@ -3,20 +3,27 @@ import numpy as np
 import scipy as sc
 from PIL import ImageOps, Image, ImageDraw
 
-from skimage import segmentation
+from skimage import segmentation, exposure
 from skimage.draw import polygon2mask
 from skimage.measure import find_contours
 from skimage.filters import difference_of_gaussians
+from skimage.filters import rank
+from skimage import filters
+from skimage import morphology
+from skimage import exposure
+from skimage.exposure import match_histograms
 
+from matplotlib import pyplot as plt
 from matplotlib.pyplot import imshow
-from pylab import *
+#from pylab import *
 
 
-def threshold(im, binary=False):
+def threshold(im, binary=False, local=False):
     '''
     im: array
     TODO:
     - noise filtering
+    - use local otsu: rank.otsu
     '''
     #im = histeq(im)
     #im = contrast(im)
@@ -24,25 +31,51 @@ def threshold(im, binary=False):
     
     minval, maxval = 0, 255
     
-    if len(im.shape)  > 2:
-        im = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)
+    im_gray = im.copy()
     
-    im = cv2.normalize(im, None, alpha=minval, beta=maxval, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
+    if is_colored(im):
+        im_gray = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)
+    
+    #im_gray = cv2.normalize(im_gray, None, alpha=minval, beta=maxval, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
     
     if binary:
         minval = 5
         thresh_type = cv2.THRESH_BINARY
+        retval, im_thresh = cv2.threshold(im_gray,minval,maxval,thresh_type)
+    elif local == False:
+        #thresh_type = cv2.THRESH_BINARY+cv2.THRESH_OTSU
+        thresh = filters.threshold_otsu(im_gray)
+        im_thresh = (im_gray > thresh).astype('uint8')*255
     else:
-        thresh_type = cv2.THRESH_BINARY+cv2.THRESH_OTSU
+        im_thresh = rank.otsu(im_gray, morphology.disk(5))
+        im_thresh = (im_gray >= im_thresh).astype('uint8')*255
         
-    retval, im = cv2.threshold(im,minval,maxval,thresh_type)
+    return im_thresh
+
+
+def threshold_local(im, thresh_type='sauvola'):    
+    minval, maxval = 0, 255
     
-    return im
+    im2 = im.copy()
+    
+    if is_colored(im):
+        im2 = cv2.cvtColor(im2, cv2.COLOR_RGB2GRAY)
+    
+    im2 = cv2.normalize(im2, None, alpha=minval, beta=maxval, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
+    
+    if thresh_type == 'sauvola':    
+        im2_thresh = filters.threshold_sauvola(im2, window_size=25)
+        
+    im2 = (im2 > im2_thresh).astype('uint8')*255
+    
+    return im2
 
 
 def histeq(im,nbr_bins=256):
-    """ Histogram equalization of a grayscale image. """
     '''
+    TODO:
+    - use local method.
+    
     Old version
     
     # get image histogram
@@ -91,9 +124,9 @@ def denoise(im,h=10,tw=7,sw=21):
 
 def get_foreground(im):
     im_processed = cv2.Laplacian(im,cv2.CV_8UC1)
-    im2_processed = preprocess.denoise(im2_processed, h=3)
+    im_processed = denoise(im_processed, h=3)
     #im_processed = cv2.dilate(im_processed,ones((3,3)),iterations=1)
-    im_processed = threshold(im_processed, binary=False)
+    im_processed = threshold_local(im_processed)
     
     h, w = im.shape[:2]
     seed = (int(h/2),int(w/2))
@@ -111,7 +144,31 @@ def get_foreground2(im):
     return msk
 
 
+def get_foreground_slic(im):
+    '''
+    TODO:
+    - make sure the foreground object is white
+    '''
+    im_slic = segmentation.slic(im,3, start_label=1, compactness=20.0, enforce_connectivity=False, max_iter=100)
+    im_slic = segmentation.clear_border(im_slic)
+    #im_slic = threshold(im_slic)
+    #im_slic = threshold_local(im_slic)
+    im_slic = (im_slic > 0).astype('uint8') * 255
+    
+    return im_slic
+
+
+def merge_segmentations(s1, s2):
+    merged_s = segmentation.join_segmentations(s1, s2)
+    
+    return merged_s
+
+
 def get_rand_points(msk,size=5):
+    '''
+    TODO:
+    - try skimage.util.regular_seeds
+    '''
     non_black = np.argwhere(msk > 0)
     rand_points = np.random.randint(0, non_black.shape[0], size=size)
     
@@ -132,8 +189,9 @@ def recolor_bw(im, new_color):
 
 
 def enhance_edges(im):
-    im_edge_enh = difference_of_gaussians(im, 1.5, multichannel=False)#, mode='constant', cval=1)
-    im_edge_enh = cv2.normalize(im_edge_enh,None,alpha=0,beta=255, norm_type=cv2.NORM_MINMAX).astype('uint8')
+    im_edge_enh = difference_of_gaussians(im, 1.5, multichannel=False) * 100#, mode='constant', cval=1)
+    #im_edge_enh = cv2.normalize(im_edge_enh,None,alpha=0,beta=255, norm_type=cv2.NORM_MINMAX).astype('uint8')
+    im_edge_enh = exposure.rescale_intensity(im_edge_enh.astype('int8'), out_range=(0,255)).astype('uint8')
     
     return im_edge_enh
 
@@ -149,6 +207,36 @@ def detect_edges(im, enhance=True):
     im_processed = threshold(im_processed, binary=False)
     
     return im_processed
+
+
+def hist_mtch_cs(im1, im2, color_space='RGB', transfer_channels=[0,1,2]):
+    trans_1 = trans_2 = None
+        
+    if color_space == 'LAB':
+        trans_1 = cv2.COLOR_RGB2LAB; trans_2 = cv2.COLOR_LAB2RGB
+        
+    if color_space == 'HSV':
+        trans_1 = cv2.COLOR_RGB2HSV; trans_2 = cv2.COLOR_HSV2RGB
+        
+    if color_space == 'HLS':
+        trans_1 = cv2.COLOR_RGB2HLS; trans_2 = cv2.COLOR_HLS2RGB
+        
+    im1_2 = im1.copy()
+    im2_2 = im2.copy()
+    
+    if trans_1 is not None:
+        im1_2 = cv2.cvtColor(im1, trans_1)
+        im2_2 = cv2.cvtColor(im2, trans_1)
+        
+    matched = match_histograms(im1_2, im2_2, multichannel=True)
+    
+    for c in transfer_channels:
+        im1_2[:,:,c] = matched[:,:,c]
+        
+    if trans_2 is not None:
+        im1_2 = cv2.cvtColor(im1_2, trans_2)
+        
+    return im1_2
 
 
 
@@ -173,4 +261,85 @@ def brush_paint(im):
 def enhance_details(im):
     #im = cv2.detailEnhance(im,sigma_s=10, sigma_r=.15)
     pass
+
+
+def remove_background(im, foreground_msk, bg_val='white'):
+    if bg_val == 'white':
+        bg = np.ones_like(im) * 255
+    elif bg_val == 'mean':
+        bg = (im.mean(axis=(0,1)) * np.ones_like(im)).astype('uint8')
+    elif bg_val == 'median':
+        bg = (np.percentile(im,50,axis=(0,1)) * np.ones_like(im)).astype('uint8')
+    elif bg_val == 'min':
+        bg = (np.percentile(im,20,axis=(0,1)) * np.ones_like(im)).astype('uint8')
+    elif bg_val == 'max':
+        bg = (np.percentile(im,80,axis=(0,1)) * np.ones_like(im)).astype('uint8')
+    else:
+        bg = np.ones_like(im) * bg_val
+        
+    bg[foreground_msk>0] = im[foreground_msk>0]
     
+    return bg
+
+
+def reload_background(im, im_ref, foreground_msk):
+    im_final = im_ref.copy()
+    im_final[foreground_msk>0] = im[foreground_msk>0]
+    
+    return im_final
+
+
+def hist_eq_cs(im, color_space='LAB', eq_channels=[0], k_size=150, use_plot=True):
+    trans_1 = trans_2 = None
+        
+    if color_space == 'LAB':
+        trans_1 = cv2.COLOR_RGB2LAB; trans_2 = cv2.COLOR_LAB2RGB; light_ch = 0
+        
+    if color_space == 'HSV':
+        trans_1 = cv2.COLOR_RGB2HSV; trans_2 = cv2.COLOR_HSV2RGB; light_ch = 2
+        
+    if color_space == 'HLS':
+        trans_1 = cv2.COLOR_RGB2HLS; trans_2 = cv2.COLOR_HLS2RGB; light_ch = 1
+        
+    if color_space == 'LUV':
+        trans_1 = cv2.COLOR_RGB2LUV; trans_2 = cv2.COLOR_LUV2RGB; light_ch = 0
+        
+    im1 = im.copy()
+    
+    if trans_1 is not None:
+        im1 = cv2.cvtColor(im1, trans_1)
+            
+    for c in eq_channels:
+        im1[:,:,c] = (exposure.equalize_adapthist(im1[:,:,c],k_size) * 255).astype('uint8')
+        
+    if use_plot:
+        imshow_c(im[:,:,light_ch])
+        
+        hist, h_centers = exposure.histogram(im[:,:,light_ch])
+        plot2(h_centers,hist)
+        
+        imshow_c(im1[:,:,light_ch])
+        
+        hist, h_centers = exposure.histogram(im1[:,:,light_ch])
+        plot2(h_centers,hist)
+        
+        
+    if trans_2 is not None:
+        im1 = cv2.cvtColor(im1, trans_2)
+        
+    return im1
+    
+
+def imshow_g(im):
+    plt.figure()
+    plt.imshow(im,cm.gray,vmin=0,vmax=255)
+    
+    
+def imshow_c(im):
+    plt.figure()
+    plt.imshow(im)
+    
+    
+def plot2(x,y):
+    plt.figure()
+    plt.plot(x,y)
