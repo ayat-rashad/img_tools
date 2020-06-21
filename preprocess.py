@@ -263,21 +263,29 @@ def enhance_details(im):
     pass
 
 
-def remove_background(im, foreground_msk, bg_val='white'):
-    if bg_val == 'white':
-        bg = np.ones_like(im) * 255
-    elif bg_val == 'mean':
-        bg = (im.mean(axis=(0,1)) * np.ones_like(im)).astype('uint8')
-    elif bg_val == 'median':
-        bg = (np.percentile(im,50,axis=(0,1)) * np.ones_like(im)).astype('uint8')
-    elif bg_val == 'min':
-        bg = (np.percentile(im,20,axis=(0,1)) * np.ones_like(im)).astype('uint8')
-    elif bg_val == 'max':
-        bg = (np.percentile(im,80,axis=(0,1)) * np.ones_like(im)).astype('uint8')
+def remove_background(im, foreground_msk, bg_val='white', bbox=None):    
+    if bbox is not None:
+        min_r, min_c, max_r, max_c = bbox
+        raw_bg = np.ones((max_r-min_r,max_c-min_c, 3))
+        msk = foreground_msk[min_r:max_r, min_c:max_c]
     else:
-        bg = np.ones_like(im) * bg_val
+        raw_bg = np.ones_like(im)
+        msk = foreground_msk.copy()
         
-    bg[foreground_msk>0] = im[foreground_msk>0]
+    if bg_val == 'white':
+        bg = raw_bg * 255
+    elif bg_val == 'mean':
+        bg = (im.mean(axis=(0,1)) * raw_bg).astype('uint8')
+    elif bg_val == 'median':
+        bg = (np.percentile(im,50,axis=(0,1)) * raw_bg).astype('uint8')
+    elif bg_val == 'min':
+        bg = (np.percentile(im,20,axis=(0,1)) * raw_bg).astype('uint8')
+    elif bg_val == 'max':
+        bg = (np.percentile(im,80,axis=(0,1)) * raw_bg).astype('uint8')
+    else:
+        bg = raw_bg * bg_val
+        
+    bg[msk>0] = im[foreground_msk>0]
     
     return bg
 
