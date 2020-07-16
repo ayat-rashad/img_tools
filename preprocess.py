@@ -196,14 +196,14 @@ def enhance_edges(im):
     return im_edge_enh
 
 
-def detect_edges(im, enhance=True):
+def detect_edges(im, enhance=False):
     im_processed = im.copy()
     
     if enhance:
         im_processed = enhance_edges(im_processed)
         
     im_processed = cv2.Laplacian(im_processed,cv2.CV_8UC1)
-    im_processed = cv2.dilate(im_processed,ones((5,5)),3)
+    im_processed = cv2.dilate(im_processed,np.ones((5,5)),3)
     im_processed = threshold(im_processed, binary=False)
     
     return im_processed
@@ -290,14 +290,20 @@ def remove_background(im, foreground_msk, bg_val='white', bbox=None):
     return bg
 
 
-def reload_background(im, im_ref, foreground_msk):
+def reload_background(im, im_ref, foreground_msk, bbox=None):
     im_final = im_ref.copy()
-    im_final[foreground_msk>0] = im[foreground_msk>0]
+    msk = foreground_msk.copy()
+    
+    if bbox is not None:
+        min_r, min_c, max_r, max_c = bbox
+        msk = foreground_msk[min_r:max_r, min_c:max_c]
+        
+    im_final[foreground_msk>0] = im[msk>0]
     
     return im_final
 
 
-def hist_eq_cs(im, color_space='LAB', eq_channels=[0], k_size=150, use_plot=True):
+def hist_eq_cs(im, color_space='LAB', eq_channels=[0], k_size=150, use_plot=False, clip=0.01):
     trans_1 = trans_2 = None
         
     if color_space == 'LAB':
@@ -318,7 +324,7 @@ def hist_eq_cs(im, color_space='LAB', eq_channels=[0], k_size=150, use_plot=True
         im1 = cv2.cvtColor(im1, trans_1)
             
     for c in eq_channels:
-        im1[:,:,c] = (exposure.equalize_adapthist(im1[:,:,c],k_size) * 255).astype('uint8')
+        im1[:,:,c] = (exposure.equalize_adapthist(im1[:,:,c],k_size, clip_limit=clip) * 255).astype('uint8')
         
     if use_plot:
         imshow_c(im[:,:,light_ch])
