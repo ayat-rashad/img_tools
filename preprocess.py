@@ -357,3 +357,29 @@ def imshow_c(im):
 def plot2(x,y):
     plt.figure()
     plt.plot(x,y)
+
+
+def crop_bbox(im, bbox):
+    min_r, min_c, max_r, max_c = bbox
+    new_im = np.ones((max_r-min_r,max_c-min_c, 3))
+    new_im = im[min_r:max_r, min_c:max_c]
+    
+    return new_im
+
+
+def crop_main_bbox(im, bboxs):
+    max_area = 0
+    main_bbox = None
+    
+    for bbox in bboxs:
+        min_r, min_c, max_r, max_c = bbox
+        area = (max_r - min_r) * (max_c - min_c)
+        
+        if area > max_area:
+            max_area = area
+            main_bbox = bbox
+            
+    min_r, min_c, max_r, max_c = bbox
+    new_im = im[min_r:max_r, min_c:max_c]
+    
+    return new_im, main_bbox
