@@ -379,7 +379,7 @@ def crop_main_bbox(im, bboxs):
             max_area = area
             main_bbox = bbox
             
-    min_r, min_c, max_r, max_c = bbox
+    min_r, min_c, max_r, max_c = main_bbox
     new_im = im[min_r:max_r, min_c:max_c]
     
     return new_im, main_bbox
